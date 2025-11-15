@@ -1,0 +1,311 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<!-- CSS for Typing Animation -->
+<style>
+    @keyframes typing-dot {
+        0% { transform: translateY(0); } 25% { transform: translateY(-3px); }
+        50% { transform: translateY(0); } 100% { transform: translateY(0); }
+    }
+    .typing-dots span {
+        display: inline-block; width: 4px; height: 4px;
+        background-color: #9ca3af; border-radius: 50%; margin: 0 1px;
+        animation: typing-dot 1.2s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+</style>
+
+<div class="flex flex-col md:flex-row gap-6">
+    
+    <!-- Main Chat Area -->
+    <div class="flex-grow md:w-2/3">
+        <div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
+            <!-- Room Header (NOW WITH IMAGE) -->
+            <div class="p-4 border-b border-gray-700 flex items-center gap-4">
+                <img src="{{ room.bot_image_url | default('https://placehold.co/100x100/4a5568/FFFFFF?text=Bot', true) }}" alt="{{ room.bot_name }}" class="w-16 h-16 rounded-full object-cover border-2 border-indigo-500">
+                <div>
+                    <h1 class="text-2xl font-bold text-white">Chat with {{ room.bot_name }}</h1>
+                    <p class="text-sm text-gray-400">
+                        Room Code: <strong class="text-white">{{ room_code }}</strong>
+                    </p>
+                    <p class="text-sm text-gray-400">
+                        Your Nickname: <strong class="text-white">{{ session.nickname }}</strong>
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Chat Messages -->
+            <div id="chat-box" class="p-4 h-[60vh] overflow-y-auto space-y-4">
+                <!-- Messages will be injected by the real-time listener -->
+            </div>
+            
+            <!-- Message Input Form -->
+            <div class="p-4 border-t border-gray-700 bg-gray-800">
+                <form id="message-form" action="{{ url_for('chat_room', room_code=room_code) }}" method="POST" class="flex gap-4">
+                    <input type="text" id="message-input" name="message" 
+                        placeholder="Type your message..." autocomplete="off" required
+                        {% if room.game_over %}disabled{% endif %}
+                        class="flex-grow p-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50">
+                    <button type="submit" id="send-button"
+                        {% if room.game_over %}disabled{% endif %}
+                        class="p-3 px-6 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-200 disabled:opacity-50">
+                        Send
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sidebar - Leaderboard -->
+    <div class="md:w-1/3">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-xl">
+            <h2 class="text-xl font-semibold mb-4 text-white">Affection Leaderboard</h2>
+            <div id="leaderboard" class="space-y-4">
+                <!-- Leaderboard will be injected by the real-time listener -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- === FIREBASE JAVASCRIPT SDKS === -->
+<script type="module">
+    // --- Import the functions we need ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+    import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+
+    // --- YOUR FIREBASE CONFIG ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCLSLut9ZoyBk6N_oQHYYXZ7WthQCuQlRE",
+      authDomain: "miki-60246.firebaseapp.com",
+      projectId: "miki-60246",
+      storageBucket: "miki-60246.firebasestorage.app",
+      messagingSenderId: "40259793246",
+      appId: "1:40259793246:web:155e68f85c9cf8b0bb5fcf",
+      measurementId: "G-LDDY90PFVK"
+    };
+    // ----------------------------------------------------
+
+    // Initialize Firebase client
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    document.addEventListener('DOMContentLoaded', (event) => {
+    
+        const chatBox = document.getElementById('chat-box');
+        const leaderboard = document.getElementById('leaderboard');
+        const messageForm = document.getElementById('message-form');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        
+        const roomCode = '{{ room_code }}';
+        const currentUserID = '{{ user_id }}';
+        const botName = '{{ room.bot_name }}'; 
+        const botAvatarUrl = '{{ room.bot_image_url | default("", true) }}';
+        
+        let userNicknames = {};
+        let typingIndicatorId = null;
+
+        // --- Helper Functions for Optimistic UI ---
+        
+        function removeTypingIndicator() {
+            if (typingIndicatorId) {
+                const indicator = document.getElementById(typingIndicatorId);
+                if (indicator) indicator.parentElement.remove();
+                typingIndicatorId = null;
+            }
+        }
+
+        function addOptimisticMessage(userId, text) {
+            const displayName = userNicknames[userId] || 'You';
+            const msgEl = document.createElement('div');
+            msgEl.classList.add('chat-bubble', 'chat-bubble-self', 'self-end');
+            msgEl.innerHTML = `<strong class="block">You (${displayName})</strong><p>${text}</p>`;
+            const wrapper = document.createElement('div');
+            wrapper.classList.add('flex', 'justify-end', 'w-full');
+            wrapper.appendChild(msgEl);
+            chatBox.appendChild(wrapper);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function addTypingIndicator() {
+            removeTypingIndicator();
+            typingIndicatorId = 'typing-' + Date.now();
+            const avatarImg = botAvatarUrl ? `<img src="${botAvatarUrl}" alt="avatar" class="chat-avatar">` : '';
+            const msgEl = document.createElement('div');
+            msgEl.classList.add('chat-bubble', 'chat-bubble-bot', 'self-start');
+            msgEl.id = typingIndicatorId;
+            msgEl.innerHTML = `<strong class="block">${botName}</strong><p class="typing-dots"><span>.</span><span>.</span><span>.</span></p>`;
+            
+            const wrapper = document.createElement('div');
+            wrapper.classList.add('flex', 'justify-start', 'w-full', 'items-end', 'gap-2');
+            if (botAvatarUrl) wrapper.innerHTML += avatarImg;
+            wrapper.appendChild(msgEl);
+            chatBox.appendChild(wrapper);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // --- UI Building Functions ---
+
+        function buildChatUI(messages) {
+            removeTypingIndicator(); 
+            chatBox.innerHTML = ''; 
+            
+            const sortedMessages = messages.sort((a, b) => {
+                if (!a.timestamp) return -1;
+                if (!b.timestamp) return 1;
+                const aMillis = a.timestamp.toMillis ? a.timestamp.toMillis() : a.timestamp;
+                const bMillis = b.timestamp.toMillis ? b.timestamp.toMillis() : b.timestamp;
+                return aMillis - bMillis;
+            });
+
+            sortedMessages.forEach(msg => {
+                const msgEl = document.createElement('div');
+                msgEl.classList.add('chat-bubble');
+                let content = '';
+                let displayName = '';
+                
+                const avatarImg = botAvatarUrl ? `<img src="${botAvatarUrl}" alt="avatar" class="chat-avatar">` : '';
+
+                if (msg.user === 'System') {
+                    msgEl.classList.add('chat-bubble-system', 'w-full');
+                    content = `<p>${msg.text}</p>`;
+                } else if (msg.user === botName) {
+                    displayName = msg.user;
+                    msgEl.classList.add('chat-bubble-bot', 'self-start');
+                    content = `<strong class="block">${displayName}</strong><p>${msg.text}</p>`;
+                } else {
+                    displayName = userNicknames[msg.user] || msg.user; 
+                    if (msg.user === currentUserID) {
+                        msgEl.classList.add('chat-bubble-self', 'self-end');
+                        content = `<strong class="block">You (${displayName})</strong><p>${msg.text}</p>`;
+                    } else {
+                        msgEl.classList.add('chat-bubble-other', 'self-start');
+                        content = `<strong class="block">${displayName}</strong><p>${msg.text}</p>`;
+                    }
+                }
+                msgEl.innerHTML = content;
+                
+                // Alignment wrappers
+                if (msg.user === 'System') {
+                    const wrapper = document.createElement('div');
+                    wrapper.classList.add('flex', 'justify-center', 'w-full');
+                    wrapper.appendChild(msgEl);
+                    chatBox.appendChild(wrapper);
+                } else if (msg.user === currentUserID) {
+                    const wrapper = document.createElement('div');
+                    wrapper.classList.add('flex', 'justify-end', 'w-full');
+                    wrapper.appendChild(msgEl);
+                    chatBox.appendChild(wrapper);
+                } else {
+                    const wrapper = document.createElement('div');
+                    wrapper.classList.add('flex', 'justify-start', 'w-full', 'items-end', 'gap-2');
+                    
+                    if (msg.user === botName && botAvatarUrl) {
+                        wrapper.innerHTML = avatarImg;
+                    }
+                    wrapper.appendChild(msgEl);
+                    chatBox.appendChild(wrapper);
+                }
+            });
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function buildLeaderboardUI(users) {
+            if (!users) { 
+                leaderboard.innerHTML = '<p class="text-gray-400">Loading...</p>';
+                return;
+            }
+            leaderboard.innerHTML = '';
+            userNicknames = {}; 
+            Object.keys(users).forEach(userId => {
+                userNicknames[userId] = users[userId].nickname;
+            });
+            
+            if (Object.keys(users).length === 0) {
+                leaderboard.innerHTML = '<p class="text-gray-400">No users yet.</p>';
+                return;
+            }
+            
+            const sortedUsers = Object.entries(users).sort(([,a], [,b]) => b.score - a.score);
+            
+            sortedUsers.forEach(([userId, userData]) => {
+                const userEl = document.createElement('div');
+                let displayName = userData.nickname;
+                let score = userData.score;
+                if (userId === currentUserID) displayName = `You (${displayName}) ⭐`;
+                
+                userEl.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-medium ${userId === currentUserID ? 'text-blue-400' : 'text-white'}">${displayName}</span>
+                        <span class="text-lg font-bold ${score === 100 ? 'text-green-400' : 'text-white'}">${score}%</span>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-2.5">
+                        <div class="bg-blue-600 h-2.5 rounded-full" style="width: ${score}%"></div>
+                    </div>
+                `;
+                leaderboard.appendChild(userEl);
+            });
+        }
+
+        // --- Real-time listener ---
+        const roomRef = doc(db, "rooms", roomCode);
+        onSnapshot(
+            roomRef,
+            (doc) => {
+                if (!doc.exists()) {
+                    console.error("Room no longer exists.");
+                    window.location.href = '/';
+                    return;
+                }
+                const roomData = doc.data();
+                buildLeaderboardUI(roomData.users);
+                buildChatUI(roomData.messages);
+                if (roomData.game_over) {
+                    messageInput.disabled = true;
+                    sendButton.disabled = true;
+                    messageInput.placeholder = "The game has ended!";
+                    removeTypingIndicator();
+                }
+            },
+            (error) => {
+                console.error("Error listening to room snapshot:", error)
+            }
+        );
+
+        // --- Form submission ---
+        if (messageForm) {
+            messageForm.addEventListener('submit', async (e) => {
+                e.preventDefault(); 
+                const message = messageInput.value;
+                if (!message.trim()) return;
+
+                addOptimisticMessage(currentUserID, message);
+                addTypingIndicator();
+                
+                const messageToSend = message;
+                messageInput.value = '';
+                messageInput.focus();
+
+                try {
+                    const formData = new FormData();
+                    formData.append('message', messageToSend);
+                    const response = await fetch(messageForm.action, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    if (!response.ok) {
+                        console.error('Failed to send message');
+                        removeTypingIndicator();
+                    }
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    removeTypingIndicator();
+                } 
+            });
+        } else {
+            console.error('Could not find message-form');
+        }
+    });
+</script>
+{% endblock %}

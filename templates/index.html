@@ -1,0 +1,69 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="flex flex-col items-center justify-center min-h-screen text-center">
+    
+    <h1 class="text-4xl md:text-5xl font-bold text-white mb-8">
+        Role-Playing Affection Game
+    </h1>
+
+    <!-- Flash Messages (for errors) -->
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="bg-red-600 text-white p-4 rounded-lg mb-6 w-full max-w-md">
+          {% for message in messages %}
+            <p>{{ message }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="w-full max-w-md space-y-6">
+        <!-- Join Game Card -->
+        <div class="bg-gray-800 p-6 rounded-lg shadow-xl">
+            <h2 class="text-2xl font-semibold mb-4 text-white">Join a Game</h2>
+            
+            <!-- 
+                *** THIS IS THE FIXED LINE ***
+                Changed 'join' to 'join_room' to match app.py
+            -->
+            <form action="{{ url_for('join_room') }}" method="POST" class="flex flex-col space-y-4">
+                
+                <input
+                    type="text"
+                    name="nickname"
+                    placeholder="Enter Your Nickname"
+                    required
+                    class="p-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                
+                <input
+                    type="text"
+                    name="room_code"
+                    placeholder="Enter Room Code"
+                    required
+                    class="p-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                <button
+                    type="submit"
+                    class="p-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-200"
+                >
+                    Join
+                </button>
+            </form>
+        </div>
+        
+        <!-- Create Game Card -->
+        <div class="bg-gray-800 p-6 rounded-lg shadow-xl">
+            <h2 class="text-2xl font-semibold mb-4 text-white">Create a New Game</h2>
+            <a 
+                href="{{ url_for('create_room') }}" 
+                class="block w-full p-3 bg-green-600 text-white text-center font-bold rounded-lg hover:bg-green-700 transition duration-200"
+            >
+                Create New Bot
+            </a>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
