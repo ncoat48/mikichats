@@ -68,7 +68,7 @@ api_key = os.environ.get('GEMINI_API_KEY')
 if not api_key:
     raise ValueError("GEMINI_API_KEY not found. Set it in Vercel Environment Variables.")
 genai.configure(api_key=api_key) 
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
 
 # --- Configure Stability AI ---
 stability_api_key = os.environ.get("STABILITY_API_KEY")
